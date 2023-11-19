@@ -83,8 +83,8 @@ namespace ExplorerTabSwitcher
         /// <summary>フック解除後、リソースを破棄する。</summary>
         public void Dispose()
         {
-            UnhookWindowsHookEx((IntPtr)this.hookHandle);
-            this.logger.Info("Unhook complete.");
+            var unhook = UnhookWindowsHookEx((IntPtr)this.hookHandle);
+            this.logger.Info($"Unhook {(unhook ? "succeeded" : "failed")}.");
 
             this.cancellation.Cancel();
             this.logger.Info("Task cancel request.");
@@ -184,6 +184,11 @@ namespace ExplorerTabSwitcher
                     point.Y = request.Item2;
                     // 座標から対象UI要素を取得
                     var target = AutomationElement.FromPoint(point);
+                    if (target is null)
+                    {
+                        this.logger.Debug($"AutomationElement.FromPoint({point.X}, {point.Y}) is null.");
+                        continue;
+                    }
                     // RuntimeIdをキーにリストをチェックし、登録済みなら対象外なので処理をスキップ
                     var runtimeId = string.Join(", ", target.GetRuntimeId());
                     if (skipList.Contains(runtimeId))
@@ -241,12 +246,7 @@ namespace ExplorerTabSwitcher
         /// この場合、前後のタブに設定された内容は保証されない。</br></returns>
         private Tuple<TargetKind, AutomationElement, AutomationElement> IdentifyElement(AutomationElement TargetElmArg, System.Windows.Point? MousePoint = null)
         {
-            var resultItem1 = TargetKind.Another;
-            var resultItem2 = TargetElmArg;
-            var resultItem3 = TargetElmArg;
             var treeWalker = TreeWalker.ControlViewWalker;
-
-            if (TargetElmArg == null) return new Tuple<TargetKind, AutomationElement, AutomationElement>(resultItem1, resultItem2, resultItem3);
             var TargetElm = TargetElmArg;
 
             if ((TargetElm.Current.ClassName == "TextBlock" || TargetElm.Current.ClassName == "Image" || TargetElm.Current.ClassName == "Button") &&
@@ -256,89 +256,149 @@ namespace ExplorerTabSwitcher
                 TargetElm = treeWalker.GetParent(TargetElm);
             }
 
+            Tuple<TargetKind, AutomationElement, AutomationElement>? result;
             if (TargetElm.Current.ClassName == "ListViewItem" && TargetElm.Current.FrameworkId == "XAML")
             {
                 // Explorerの可能性
-                var prop = TargetElm.GetRuntimeId();
-                if (prop is not null && prop.Length > 1 && prop[1] != 0)
-                {
-                    var nativeElm = AutomationElement.FromHandle((IntPtr)prop[1]);
-                    if (nativeElm != null && nativeElm.Current.ClassName == "Microsoft.UI.Content.DesktopChildSiteBridge")
-                    {
-                        // Explorerは親まで遡ってクラス名を見る必要がある
-                        var parent = TreeWalker.ControlViewWalker.GetParent(nativeElm);
-                        if (parent != null && parent.Current.ClassName == "CabinetWClass")
-                        {
-                            // たぶんExplorerで間違いないはず
-                            this.logger.Debug("Explorer tab found.");
-                            // ExplorerはタブそのものがZ最上位にいるようなので、親を取得する必要がある
-                            var selectElms = this.GetSelectedChild(treeWalker, treeWalker.GetParent(TargetElm), "ListViewItem");
-                            if (selectElms.Count > 2)
-                            {
-                                this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
-                                resultItem1 = TargetKind.Explorer;
-                                resultItem2 = selectElms[1];
-                                resultItem3 = selectElms[2];
-                            }
-                        }
-                    }
-                }
+                result = this.IdentifyExplorer(treeWalker, TargetElm);
             }
             else if (TargetElm.Current.ClassName == "TabStrip::TabDragContextImpl" && TargetElm.Current.FrameworkId == "Chrome")
             {
                 // Edgeの可能性
-                var prop = TargetElm.GetRuntimeId();
-                if (prop is not null && prop.Length > 1 && prop[1] != 0)
-                {
-                    var nativeElm = AutomationElement.FromHandle((IntPtr)prop[1]);
-                    if (nativeElm != null && nativeElm.Current.ClassName == "Chrome_WidgetWin_1")
-                    {
-                        // たぶんEdgeで間違いないはず
-                        this.logger.Debug("Edge tab found.");
-                        // EdgeではUIツリーの構造上、前の兄弟要素がタブアイテムの親要素となる
-                        var selectElms = this.GetSelectedChild(treeWalker, treeWalker.GetPreviousSibling(TargetElm), "EdgeTab");
-                        if (selectElms.Count > 2)
-                        {
-                            this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
-                            resultItem1 = TargetKind.Edge;
-                            resultItem2 = selectElms[1];
-                            resultItem3 = selectElms[2];
-                        }
-                    }
-                }
+                result = this.IdentifyEdge(treeWalker, TargetElm);
             }
             else if (TargetElm.Current.ClassName == "CASCADIA_HOSTING_WINDOW_CLASS" && TargetElm.Current.FrameworkId == "Win32")
             {
                 // Windows Terminalの可能性
-                var tabList = this.FindElements(TargetElm, "ListView");
-                if (tabList is not null && tabList.Count > 0 && tabList[0].Current.AutomationId == "TabListView")
+                result = this.IdentifyWindosTerminal(treeWalker, TargetElm, MousePoint);
+            }
+            else
+            {
+                // いずれでもない
+                result = new Tuple<TargetKind, AutomationElement, AutomationElement>(TargetKind.Another, TargetElmArg, TargetElmArg);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 指定したUI要素がExplorerかチェックし、そうであればアクティブタブの前後タブを取得する。
+        /// </summary>
+        /// <param name="treeWalker">UI要素探索に使用するTreeWalkerを指定する。</param>
+        /// <param name="TargetElm">チェック対象のUI要素を指定する。</param>
+        /// <returns><br>切り替え対象だった場合、[対象コントロールの種別, 前のタブ, 後のタブ]の順に格納されたタプルが返る。</br>
+        /// <br>該当しない場合は、対象コントロールの種別にTargetKind.Anotherが設定されたタプルが返る。
+        /// この場合、前後のタブに設定された内容は保証されない。</br></returns>
+        private Tuple<TargetKind, AutomationElement, AutomationElement> IdentifyExplorer(TreeWalker treeWalker, AutomationElement TargetElm)
+        {
+            var resultItem1 = TargetKind.Another;
+            var resultItem2 = TargetElm;
+            var resultItem3 = TargetElm;
+
+            var prop = TargetElm.GetRuntimeId();
+            if (prop is not null && prop.Length > 1 && prop[1] != 0)
+            {
+                var nativeElm = AutomationElement.FromHandle((IntPtr)prop[1]);
+                if (nativeElm != null && nativeElm.Current.ClassName == "Microsoft.UI.Content.DesktopChildSiteBridge")
                 {
-                    // たぶんWindows Terminalで間違いないはず
-                    var tabBox = tabList[0].Current.BoundingRectangle;
-                    // 座標からUI要素を取ると一番デカい領域で取れてしまうので、自力でHit判定する必要がある
-                    if (MousePoint is not null && (int)tabBox.Left <= MousePoint?.X && (int)tabBox.Right >= MousePoint?.X &&
-                        (int)tabBox.Top <= MousePoint?.Y && (int)tabBox.Bottom >= MousePoint?.Y)
+                    // Explorerは親まで遡ってクラス名を見る必要がある
+                    var parent = TreeWalker.ControlViewWalker.GetParent(nativeElm);
+                    if (parent != null && parent.Current.ClassName == "CabinetWClass")
                     {
-                        this.logger.Debug("Windows Terminal tab found.");
-                        // Windows Terminalは親ウィンドウからListViewクラスを見付けるとそこがタブアイテムの親となっている
-                        var selectElms = this.GetSelectedChild(treeWalker, tabList[0], "ListViewItem");
+                        // たぶんExplorerで間違いないはず
+                        this.logger.Debug("Explorer tab found.");
+                        // ExplorerはタブそのものがZ最上位にいるようなので、親を取得する必要がある
+                        var selectElms = this.GetSelectedChild(treeWalker, treeWalker.GetParent(TargetElm), "ListViewItem");
                         if (selectElms.Count > 2)
                         {
                             this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
-                            resultItem1 = TargetKind.WindowsTerminal;
+                            resultItem1 = TargetKind.Explorer;
                             resultItem2 = selectElms[1];
                             resultItem3 = selectElms[2];
                         }
                     }
-                    else
+                }
+            }
+            return new Tuple<TargetKind, AutomationElement, AutomationElement>(resultItem1, resultItem2, resultItem3);
+        }
+
+        /// <summary>
+        /// 指定したUI要素がEdgeかチェックし、そうであればアクティブタブの前後タブを取得する。
+        /// </summary>
+        /// <param name="treeWalker">UI要素探索に使用するTreeWalkerを指定する。</param>
+        /// <param name="TargetElm">チェック対象のUI要素を指定する。</param>
+        /// <returns><br>切り替え対象だった場合、[対象コントロールの種別, 前のタブ, 後のタブ]の順に格納されたタプルが返る。</br>
+        /// <br>該当しない場合は、対象コントロールの種別にTargetKind.Anotherが設定されたタプルが返る。
+        /// この場合、前後のタブに設定された内容は保証されない。</br></returns>
+        private Tuple<TargetKind, AutomationElement, AutomationElement> IdentifyEdge(TreeWalker treeWalker, AutomationElement TargetElm)
+        {
+            var resultItem1 = TargetKind.Another;
+            var resultItem2 = TargetElm;
+            var resultItem3 = TargetElm;
+
+            var prop = TargetElm.GetRuntimeId();
+            if (prop is not null && prop.Length > 1 && prop[1] != 0)
+            {
+                var nativeElm = AutomationElement.FromHandle((IntPtr)prop[1]);
+                if (nativeElm != null && nativeElm.Current.ClassName == "Chrome_WidgetWin_1")
+                {
+                    // たぶんEdgeで間違いないはず
+                    this.logger.Debug("Edge tab found.");
+                    // EdgeではUIツリーの構造上、前の兄弟要素がタブアイテムの親要素となる
+                    var selectElms = this.GetSelectedChild(treeWalker, treeWalker.GetPreviousSibling(TargetElm), "EdgeTab");
+                    if (selectElms.Count > 2)
                     {
-                        // Hit判定ハズレ
-                        resultItem1 = TargetKind.WindowsTerminalnotTab;
-                        this.logger.Debug($"Out of TabListView area({MousePoint?.X}, {MousePoint?.Y}).");
+                        this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
+                        resultItem1 = TargetKind.Edge;
+                        resultItem2 = selectElms[1];
+                        resultItem3 = selectElms[2];
                     }
                 }
             }
+            return new Tuple<TargetKind, AutomationElement, AutomationElement>(resultItem1, resultItem2, resultItem3);
+        }
 
+        /// <summary>
+        /// 指定したUI要素がWindows Terminalかチェックし、そうであればアクティブタブの前後タブを取得する。
+        /// </summary>
+        /// <param name="treeWalker">UI要素探索に使用するTreeWalkerを指定する。</param>
+        /// <param name="TargetElm">チェック対象のUI要素を指定する。</param>
+        /// <returns><br>切り替え対象だった場合、[対象コントロールの種別, 前のタブ, 後のタブ]の順に格納されたタプルが返る。</br>
+        /// <br>該当しない場合は、対象コントロールの種別にTargetKind.Anotherが設定されたタプルが返る。
+        /// この場合、前後のタブに設定された内容は保証されない。</br></returns>
+        private Tuple<TargetKind, AutomationElement, AutomationElement> IdentifyWindosTerminal(TreeWalker treeWalker, AutomationElement TargetElm, System.Windows.Point? MousePoint)
+        {
+            var resultItem1 = TargetKind.Another;
+            var resultItem2 = TargetElm;
+            var resultItem3 = TargetElm;
+
+            var tabList = this.FindElements(TargetElm, "ListView");
+            if (tabList is not null && tabList.Count > 0 && tabList[0].Current.AutomationId == "TabListView")
+            {
+                // たぶんWindows Terminalで間違いないはず
+                var tabBox = tabList[0].Current.BoundingRectangle;
+                // 座標からUI要素を取ると一番デカい領域で取れてしまうので、自力でHit判定する必要がある
+                if (MousePoint is not null && (int)tabBox.Left <= MousePoint?.X && (int)tabBox.Right >= MousePoint?.X &&
+                    (int)tabBox.Top <= MousePoint?.Y && (int)tabBox.Bottom >= MousePoint?.Y)
+                {
+                    this.logger.Debug("Windows Terminal tab found.");
+                    // Windows Terminalは親ウィンドウからListViewクラスを見付けるとそこがタブアイテムの親となっている
+                    var selectElms = this.GetSelectedChild(treeWalker, tabList[0], "ListViewItem");
+                    if (selectElms.Count > 2)
+                    {
+                        this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
+                        resultItem1 = TargetKind.WindowsTerminal;
+                        resultItem2 = selectElms[1];
+                        resultItem3 = selectElms[2];
+                    }
+                }
+                else
+                {
+                    // Hit判定ハズレ
+                    resultItem1 = TargetKind.WindowsTerminalnotTab;
+                    this.logger.Debug($"Out of TabListView area({MousePoint?.X}, {MousePoint?.Y}).");
+                }
+            }
             return new Tuple<TargetKind, AutomationElement, AutomationElement>(resultItem1, resultItem2, resultItem3);
         }
 
