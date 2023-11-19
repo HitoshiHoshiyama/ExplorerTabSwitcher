@@ -170,7 +170,7 @@ namespace ExplorerTabSwitcher
         {
             var point = new System.Windows.Point();
             int delta;
-            var targetKindList = new List<string>();    // 対象外だったAutomationElementのRuntimeIdリスト
+            var skipList = new List<string>();  // 対象外だったAutomationElementのRuntimeIdリスト
 
             while (true)
             {
@@ -186,7 +186,7 @@ namespace ExplorerTabSwitcher
                     var target = AutomationElement.FromPoint(point);
                     // RuntimeIdをキーにリストをチェックし、登録済みなら対象外なので処理をスキップ
                     var runtimeId = string.Join(", ", target.GetRuntimeId());
-                    if (targetKindList.Contains(runtimeId))
+                    if (skipList.Contains(runtimeId))
                     {
                         this.logger.Debug($"Skip element:({runtimeId}).");
                         continue;
@@ -194,34 +194,29 @@ namespace ExplorerTabSwitcher
                     this.logger.Debug($"WM_MOUSEWHEEL({request.Item1}, {request.Item2} delta:{delta}) Target Class:{target.Current.ClassName}");
 
                     // 対象UI要素がタブ切り替え対象かチェック
-                    var elemId = this.IdentifyElement(target);
+                    var elemId = this.IdentifyElement(target, point);
                     // TODO: Ctrlキー同時押し排除
-                    if (elemId is not null)
+                    if (elemId.Item1 != TargetKind.Another && elemId.Item1 != TargetKind.WindowsTerminalnotTab && delta != 0)
                     {
-                        if (elemId.Item1 != TargetKind.Another && delta != 0)
+                        // タブ切り替え処理
+                        AutomationElement switchTab = (delta > 0) ? elemId.Item2 : elemId.Item3;
+                        SelectionItemPattern? pattern = switchTab.GetCurrentPattern(SelectionItemPattern.Pattern) as SelectionItemPattern;
+                        if (pattern != null)
                         {
-                            // タブ切り替え処理
-                            AutomationElement switchTab = (delta > 0) ? elemId.Item2 : elemId.Item3;
-                            SelectionItemPattern? pattern = switchTab.GetCurrentPattern(SelectionItemPattern.Pattern) as SelectionItemPattern;
-                            if (pattern != null)
-                            {
-                                pattern.Select();
-                                this.logger.Debug($"Tab switch to {switchTab.Current.Name}");
-                            }
-                        }
-                        else if(elemId.Item1 == TargetKind.Another)
-                        {
-                            // 対象外だったRuntimeIdをリストに登録
-                            runtimeId = string.Join(", ", target.GetRuntimeId());
-                            if (!targetKindList.Contains(runtimeId)) targetKindList.Add(runtimeId);
+                            pattern.Select();
+                            this.logger.Debug($"Tab switch to {switchTab.Current.Name}");
                         }
                     }
-                    else
+                    else if (elemId.Item1 != TargetKind.WindowsTerminalnotTab)
                     {
                         // 対象外だったRuntimeIdをリストに登録
                         runtimeId = string.Join(", ", target.GetRuntimeId());
-                        if (!targetKindList.Contains(runtimeId)) targetKindList.Add(runtimeId);
-                    }
+                        if (!skipList.Contains(runtimeId))
+                        {
+                            skipList.Add(runtimeId);
+                            this.logger.Debug($"Add to skip list:{runtimeId}");
+                        }
+                    }else this.logger.Debug($"Do not add to skip list:{runtimeId}");
                 }
                 catch (OperationCanceledException)
                 {
@@ -242,13 +237,16 @@ namespace ExplorerTabSwitcher
         /// </summary>
         /// <param name="TargetElmArg">チェック対象のUI要素を指定する。</param>
         /// <returns><br>切り替え対象だった場合、[対象コントロールの種別, 前のタブ, 後のタブ]の順に格納されたタプルが返る。</br>
-        /// <br>該当しない場合はnullが返る。</br></returns>
-        private Tuple<TargetKind, AutomationElement, AutomationElement>? IdentifyElement(AutomationElement TargetElmArg)
+        /// <br>該当しない場合は、対象コントロールの種別にTargetKind.Anotherが設定されたタプルが返る。
+        /// この場合、前後のタブに設定された内容は保証されない。</br></returns>
+        private Tuple<TargetKind, AutomationElement, AutomationElement> IdentifyElement(AutomationElement TargetElmArg, System.Windows.Point? MousePoint = null)
         {
-            Tuple<TargetKind, AutomationElement, AutomationElement>? result = null;
+            var resultItem1 = TargetKind.Another;
+            var resultItem2 = TargetElmArg;
+            var resultItem3 = TargetElmArg;
             var treeWalker = TreeWalker.ControlViewWalker;
 
-            if (TargetElmArg == null) return null;
+            if (TargetElmArg == null) return new Tuple<TargetKind, AutomationElement, AutomationElement>(resultItem1, resultItem2, resultItem3);
             var TargetElm = TargetElmArg;
 
             if ((TargetElm.Current.ClassName == "TextBlock" || TargetElm.Current.ClassName == "Image" || TargetElm.Current.ClassName == "Button") &&
@@ -278,7 +276,9 @@ namespace ExplorerTabSwitcher
                             if (selectElms.Count > 2)
                             {
                                 this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
-                                result = new Tuple<TargetKind, AutomationElement, AutomationElement>(TargetKind.Explorer, selectElms[1], selectElms[2]);
+                                resultItem1 = TargetKind.Explorer;
+                                resultItem2 = selectElms[1];
+                                resultItem3 = selectElms[2];
                             }
                         }
                     }
@@ -300,7 +300,9 @@ namespace ExplorerTabSwitcher
                         if (selectElms.Count > 2)
                         {
                             this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
-                            result = new Tuple<TargetKind, AutomationElement, AutomationElement>(TargetKind.Edge, selectElms[1], selectElms[2]);
+                            resultItem1 = TargetKind.Edge;
+                            resultItem2 = selectElms[1];
+                            resultItem3 = selectElms[2];
                         }
                     }
                 }
@@ -312,18 +314,32 @@ namespace ExplorerTabSwitcher
                 if (tabList is not null && tabList.Count > 0 && tabList[0].Current.AutomationId == "TabListView")
                 {
                     // たぶんWindows Terminalで間違いないはず
-                    this.logger.Debug("Windows Terminal tab found.");
-                    // Windows Terminalは親ウィンドウからListViewクラスを見付けるとそこがタブアイテムの親となっている
-                    var selectElms = this.GetSelectedChild(treeWalker, tabList[0], "ListViewItem");
-                    if (selectElms.Count > 2)
+                    var tabBox = tabList[0].Current.BoundingRectangle;
+                    // 座標からUI要素を取ると一番デカい領域で取れてしまうので、自力でHit判定する必要がある
+                    if (MousePoint is not null && (int)tabBox.Left <= MousePoint?.X && (int)tabBox.Right >= MousePoint?.X &&
+                        (int)tabBox.Top <= MousePoint?.Y && (int)tabBox.Bottom >= MousePoint?.Y)
                     {
-                        this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
-                        result = new Tuple<TargetKind, AutomationElement, AutomationElement>(TargetKind.WindowsTerminal, selectElms[1], selectElms[2]);
+                        this.logger.Debug("Windows Terminal tab found.");
+                        // Windows Terminalは親ウィンドウからListViewクラスを見付けるとそこがタブアイテムの親となっている
+                        var selectElms = this.GetSelectedChild(treeWalker, tabList[0], "ListViewItem");
+                        if (selectElms.Count > 2)
+                        {
+                            this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
+                            resultItem1 = TargetKind.WindowsTerminal;
+                            resultItem2 = selectElms[1];
+                            resultItem3 = selectElms[2];
+                        }
+                    }
+                    else
+                    {
+                        // Hit判定ハズレ
+                        resultItem1 = TargetKind.WindowsTerminalnotTab;
+                        this.logger.Debug($"Out of TabListView area({MousePoint?.X}, {MousePoint?.Y}).");
                     }
                 }
             }
 
-            return result;
+            return new Tuple<TargetKind, AutomationElement, AutomationElement>(resultItem1, resultItem2, resultItem3);
         }
 
         /// <summary>
@@ -426,11 +442,18 @@ namespace ExplorerTabSwitcher
         private Logger logger;
     }
 
+    /// <summary>判定領域の結果列挙体。</summary>
     internal enum TargetKind : int
     {
+        /// <summary>切り替え対象(Explorer)</summary>
         Explorer,
+        /// <summary>切り替え対象(Edge)</summary>
         Edge,
+        /// <summary>切り替え対象(Windows Terminal)</summary>
         WindowsTerminal,
+        /// <summary>非切り替え対象(Windows Terminal)</summary>
+        WindowsTerminalnotTab,
+        /// <summary>非切り替え対象</summary>
         Another
     }
 }
