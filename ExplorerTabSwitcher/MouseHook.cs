@@ -272,6 +272,11 @@ namespace ExplorerTabSwitcher
                 // Windows Terminalの可能性
                 result = this.IdentifyWindosTerminal(treeWalker, TargetElm, MousePoint);
             }
+            else if (TargetElm.Current.ClassName == "Notepad" && TargetElm.Current.FrameworkId == "Win32")
+            {
+                // メモ帳の可能性(Windows Terminalとメモ帳は共通構造)
+                result = this.IdentifyWindosTerminal(treeWalker, TargetElm, MousePoint);
+            }
             else
             {
                 // いずれでもない
@@ -359,7 +364,7 @@ namespace ExplorerTabSwitcher
         }
 
         /// <summary>
-        /// 指定したUI要素がWindows Terminalかチェックし、そうであればアクティブタブの前後タブを取得する。
+        /// 指定したUI要素がWindows Terminal(またはメモ帳)かチェックし、そうであればアクティブタブの前後タブを取得する。
         /// </summary>
         /// <param name="treeWalker">UI要素探索に使用するTreeWalkerを指定する。</param>
         /// <param name="TargetElm">チェック対象のUI要素を指定する。</param>
