@@ -3,7 +3,7 @@
 ## 目的
 
 Windows11でタブ化したエクスプローラのタブを、マウスホイールで切り替えるために開発しました。  
-ついでということで、EdgeとWindows Terminalのタブ切り替えも可能にしました。  
+ついでということで、Edge/Windows Terminal/メモ帳のタブ切り替えも可能にしました。  
 
 ## 動作環境
 
@@ -31,39 +31,42 @@ Windows11でタブ化したエクスプローラのタブを、マウスホイ�
 
 ## トラブルシューティング
 
-現象に再現性がある場合、以下の手順でログを採ってIssue登録していただけると解決する可能性があります。  
-1. Windowsの「タスクスケジューラ」を開きます。
-1. 「タスク スケジューラ ライブラリ」から「ExplorerTabSwitcher」を探し、右クリックメニューから「終了」をクリックします。
-1. インストールフォルダにある `NLog.config` をメモ帳などで開きます。
-1. `minlevel="Info"` となっている個所を、`minlevel="Trace"` に変更・保存します。  
+- 起動しない場合(タスクを起動しても準備完了に戻ってしまう)は、まず動作環境を確認してください。  
+  .NET 8.0 がインストールされていない場合は、[.NET 8.0 のダウンロード](https://dotnet.microsoft.com/ja-jp/download/dotnet/8.0)からダウンロード・インストールをお願いします。
 
-     変更前
-     ```xml
-      <rules>
-        <logger name="*" minlevel="Info" writeTo="logFile" />
-        <logger name="*" minlevel="Trace" writeTo="console" />
-      </rules>
-     ```
-     変更後
-     ```xml
-      <rules>
-        <logger name="*" minlevel="Trace" writeTo="logFile" />
-        <logger name="*" minlevel="Trace" writeTo="console" />
-      </rules>
-     ```
-1. 「ExplorerTabSwitcher」を右クリックし、「実行する(R)」をクリックします。
-   状態が「実行中」になるのを確認します。
-1. 現象を再現させます。
-1. インストールフォルダにある `logs` フォルダを開きます。
-1. `logs` フォルダにある今日の日付のファイルが、目的のログファイルです。
-   これをIssueに添付してください。
-1. 先ほど変更した `NLog.config` を元に戻して保存します。
-1. 「タスクスケジューラ」から「ExplorerTabSwitcher」を「終了」->「実行する(R)」で再起動したら完了です。
+- 現象に再現性がある場合、以下の手順でログを採ってIssue登録していただけると解決する可能性があります。  
+  1. Windowsの「タスクスケジューラ」を開きます。
+  1. 「タスク スケジューラ ライブラリ」から「ExplorerTabSwitcher」を探し、右クリックメニューから「終了」をクリックします。
+  1. インストールフォルダにある `NLog.config` をメモ帳などで開きます。
+  1. `minlevel="Info"` となっている個所を、`minlevel="Trace"` に変更・保存します。  
+  
+       変更前
+       ```xml
+        <rules>
+          <logger name="*" minlevel="Info" writeTo="logFile" />
+          <logger name="*" minlevel="Trace" writeTo="console" />
+        </rules>
+       ```
+       変更後
+       ```xml
+        <rules>
+          <logger name="*" minlevel="Trace" writeTo="logFile" />
+          <logger name="*" minlevel="Trace" writeTo="console" />
+        </rules>
+       ```
+  1. 「ExplorerTabSwitcher」を右クリックし、「実行する(R)」をクリックします。
+     状態が「実行中」になるのを確認します。
+  1. 現象を再現させます。
+  1. インストールフォルダにある `logs` フォルダを開きます。
+  1. `logs` フォルダにある今日の日付のファイルが、目的のログファイルです。
+     これをIssueに添付してください。
+  1. 先ほど変更した `NLog.config` を元に戻して保存します。
+  1. 「タスクスケジューラ」から「ExplorerTabSwitcher」を「終了」->「実行する(R)」で再起動したら完了です。
 
 ## TODO
 
 - Ctrlキーを押しながらのホイール回転を無視
-- メモ帳のタブ切り替え
+  他のアプリ(ex. Firefox他)でも無視していなかったので、TODOからオミット予定
 
 ## 作者連絡先
 
