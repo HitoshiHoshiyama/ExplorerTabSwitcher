@@ -265,10 +265,11 @@ namespace ExplorerTabSwitcher
                         continue;
                     }
                     // RuntimeIdをキーにリストをチェックし、登録済みなら対象外なので処理をスキップ
-                    var runtimeId = string.Join(", ", target.GetRuntimeId());
-                    if (skipList.Contains(runtimeId))
+                    var runtimeId = target.GetRuntimeId();
+                    var runtimeIdStr = runtimeId is not null ? string.Join(", ", runtimeId) : string.Empty;
+                    if (runtimeIdStr != string.Empty && skipList.Contains(runtimeIdStr))
                     {
-                        this.logger.Debug($"Skip element:({runtimeId}).");
+                        this.logger.Debug($"Skip element:({runtimeIdStr}).");
                         continue;
                     }
                     this.logger.Debug($"WM_MOUSEWHEEL({request.Item1}, {request.Item2} delta:{delta}) Target Class:{target.Current.ClassName}");
@@ -300,13 +301,14 @@ namespace ExplorerTabSwitcher
                     else if (elemId.Item1 != TargetKind.WindowsTerminalnotTab)
                     {
                         // 対象外だったRuntimeIdをリストに登録
-                        runtimeId = string.Join(", ", target.GetRuntimeId());
-                        if (!skipList.Contains(runtimeId))
+                        runtimeId = target.GetRuntimeId();
+                        runtimeIdStr = runtimeId is not null ? string.Join(", ", runtimeId) : string.Empty;
+                        if (runtimeIdStr != string.Empty && !skipList.Contains(runtimeIdStr))
                         {
-                            skipList.Add(runtimeId);
-                            this.logger.Debug($"Add to skip list:{runtimeId}");
+                            skipList.Add(runtimeIdStr);
+                            this.logger.Debug($"Add to skip list:{runtimeIdStr}");
                         }
-                    }else this.logger.Debug($"Do not add to skip list:{runtimeId}");
+                    }else this.logger.Debug($"Do not add to skip list:{runtimeIdStr}");
                 }
                 catch (OperationCanceledException)
                 {
