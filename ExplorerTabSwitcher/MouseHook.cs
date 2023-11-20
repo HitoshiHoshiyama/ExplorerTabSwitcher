@@ -1,24 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Collections.Concurrent;
-using System.Linq;
-using System.Net;
+﻿using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
 using System.Diagnostics;
 using System.Windows.Automation;
 
 using NLog;
-using System.Drawing;
-using NLog.Targets;
-using System.Windows.Input;
 
 namespace ExplorerTabSwitcher
 {
     /// <summary>マウスホイールメッセージをフックするクラス。</summary>
     internal class MouseHook : IDisposable
     {
+        #region NativeApi block
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
 
@@ -54,6 +46,7 @@ namespace ExplorerTabSwitcher
 
         private const int WH_MOUSE_LL = 0x000E;
         private const int WM_MOUSEWHEEL = 0x020A;
+        #endregion NativeApi block
 
         /// <summary>
         /// コンストラクタ。
@@ -107,7 +100,9 @@ namespace ExplorerTabSwitcher
         {
             if (nCode >= 0 && wParam == (IntPtr)WM_MOUSEWHEEL && lParam != IntPtr.Zero)
             {
+#pragma warning disable CS8605 // null の可能性がある値をボックス化解除しています。<- lParam != IntPtr.Zero でチェックしてるのにうるさいので抑制
                 MSLLHOOKSTRUCT hookStr = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
+#pragma warning restore CS8605 // null の可能性がある値をボックス化解除しています。
                 var delta = (int)hookStr.mouseData >> 16;
                 this.HookQueue.Add(new Tuple<int, int, int>(hookStr.pt.X, hookStr.pt.Y, delta));
                 this.logger.Debug($"Queue add({hookStr.pt.X}, {hookStr.pt.Y} delta:{delta})");
@@ -147,6 +142,86 @@ namespace ExplorerTabSwitcher
     /// <summary>タブ切り替え処理クラス。</summary>
     internal class TabSwitcher
     {
+        #region NativeApi block
+        [DllImport("user32.dll", EntryPoint = "MapVirtualKeyA")]
+        private extern static int MapVirtualKey(int wCode, int wMapType);
+        [DllImport("user32.dll", SetLastError = true)]
+        private extern static uint SendInput(int nInputs, Input[] pInputs, int cbsize);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool PostMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT
+        {
+            public int x;
+            public int y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct MouseInput
+        {
+            public int X;
+            public int Y;
+            public int Data;
+            public int Flags;
+            public int Time;
+            public IntPtr ExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct KeyboardInput
+        {
+            public short VirtualKey;
+            public short ScanCode;
+            public int Flags;
+            public int Time;
+            public IntPtr ExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct HardwareInput
+        {
+            public int uMsg;
+            public short wParamL;
+            public short wParamH;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct Input
+        {
+            public int Type;
+            public InputUnion ui;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        struct InputUnion
+        {
+            [FieldOffset(0)]
+            public MouseInput Mouse;
+            [FieldOffset(0)]
+            public KeyboardInput Keyboard;
+            [FieldOffset(0)]
+            public HardwareInput Hardware;
+        }
+
+        public const int INPUT_MOUSE = 0;
+        public const int INPUT_KEYBOARD = 1;
+        public const int INPUT_HARDWARE = 2;
+
+        public const int KEYEVENTF_KEYDOWN = 0;
+        public const int KEYEVENTF_KEYUP = 2;
+        public const int KEYEVENTF_EXTENDEDKEY = 1;
+
+        private const int WM_KEYDOWN = 0x0100;
+        private const int WM_KEYUP = 0x0101;
+
+        private const int VK_TAB = 0x09;
+        private const int VK_SHIFT = 0x10;
+        private const int VK_CONTROL = 0x11;
+
+        private const int MAPVK_VK_TO_VSC_EX = 4;
+        #endregion NativeApi block
+
         /// <summary>
         /// コンストラクタ。
         /// </summary>
@@ -204,12 +279,22 @@ namespace ExplorerTabSwitcher
                     if (elemId.Item1 != TargetKind.Another && elemId.Item1 != TargetKind.WindowsTerminalnotTab && delta != 0)
                     {
                         // タブ切り替え処理
-                        AutomationElement switchTab = (delta > 0) ? elemId.Item2 : elemId.Item3;
-                        SelectionItemPattern? pattern = switchTab.GetCurrentPattern(SelectionItemPattern.Pattern) as SelectionItemPattern;
-                        if (pattern != null)
+                        if (elemId.Item1 == TargetKind.AcrobatReader)
                         {
-                            pattern.Select();
-                            this.logger.Debug($"Tab switch to {switchTab.Current.Name}");
+                            // Acrobat Reader DC(等のUIAutomationで切り替えられないタイプ)
+                            var postResult = this.SendCtrlTabStroke(elemId.Item2.Current.NativeWindowHandle, delta > 0);
+                            this.logger.Debug($"Tab switch to {(delta > 0 ? "left" : "right")} is {(postResult ? "succeeded" : "failed")}.");
+                        }
+                        else
+                        {
+                            // UIAutomationで切り替えられるタイプ
+                            AutomationElement switchTab = (delta > 0) ? elemId.Item2 : elemId.Item3;
+                            SelectionItemPattern? pattern = switchTab.GetCurrentPattern(SelectionItemPattern.Pattern) as SelectionItemPattern;
+                            if (pattern != null)
+                            {
+                                pattern.Select();
+                                this.logger.Debug($"Tab switch to {switchTab.Current.Name}");
+                            }
                         }
                     }
                     else if (elemId.Item1 != TargetKind.WindowsTerminalnotTab)
@@ -276,6 +361,13 @@ namespace ExplorerTabSwitcher
             {
                 // メモ帳の可能性(Windows Terminalとメモ帳は共通構造)
                 result = this.IdentifyWindosTerminal(treeWalker, TargetElm, MousePoint);
+            }
+            else if (TargetElm.Current.ClassName == "AVL_AVView" && TargetElm.Current.Name == "AVTabLinksContainerViewForDocs")
+            {
+                // Acrobat Reader DCの可能性
+                var parent = this.FindParentElement(treeWalker, TargetElm, "AcrobatSDIWindow");
+                if (parent is not null) result = new Tuple<TargetKind, AutomationElement, AutomationElement>(TargetKind.AcrobatReader, parent, parent);
+                else result = new Tuple<TargetKind, AutomationElement, AutomationElement>(TargetKind.Another, TargetElmArg, TargetElmArg);
             }
             else
             {
@@ -499,12 +591,77 @@ namespace ExplorerTabSwitcher
             return result;
         }
 
+        /// <summary>
+        /// 指定UI要素から遡り、指定したクラスの親UI要素を取得する。
+        /// </summary>
+        /// <param name="treeWalker">検索に使用するTreeWalkerを指定する。</param>
+        /// <param name="childElement">検索の起点とするUI要素を指定する。</param>
+        /// <param name="automationClass">検索するクラス名を指定する。</param>
+        /// <returns><br>発見した親UI要素を返す。</br>
+        /// <br>見付からなかった場合はnullを返す。</br></returns>
+        private AutomationElement? FindParentElement(TreeWalker treeWalker, AutomationElement childElement, string automationClass)
+        {
+            var parent = treeWalker.GetParent(childElement);
+            if (parent is null) return null;
+            else if (parent.Current.ClassName == automationClass) return parent;
+            else return this.FindParentElement(treeWalker, parent, automationClass);
+        }
+
+        /// <summary>
+        /// Ctrl+Tab(+Shift)のキーストロークを対象ウィンドウへ送信する。
+        /// </summary>
+        /// <param name="Hwnd">対象ウィンドウのハンドルを指定する。</param>
+        /// <param name="IsReverse">Shift押下が必要な場合はtrueを指定する。</param>
+        private bool SendCtrlTabStroke(IntPtr Hwnd, bool IsReverse)
+        {
+            var result = true;
+            List<short> vkList = IsReverse ? [(short)VK_CONTROL, (short)VK_SHIFT] : [(short)VK_CONTROL];
+            result &= this.SentGlobalKey(vkList, true);
+            Thread.Sleep(SENDINPUT_POSTMESSAGE_WAIT_TIME);
+            result &= PostMessage(Hwnd, WM_KEYDOWN, VK_TAB, 0);
+            result &= PostMessage(Hwnd, WM_KEYUP, VK_TAB, 0);
+            Thread.Sleep(SENDINPUT_POSTMESSAGE_WAIT_TIME);
+            result &= this.SentGlobalKey(vkList, false);
+            this.logger.Debug($"PostMessage to {Hwnd:x8} is {(result ? "succeeded" : "failed")}.");
+
+            return result;
+        }
+
+        /// <summary>
+        /// <br>キーストロークをエミュレーションする。</br>
+        /// <br>特殊キーを合成して送信可能。</br>
+        /// </summary>
+        /// <param name="VirtualKeyList">仮想キーコードリストを指定する。</param>
+        /// <param name="IsKeyDown">キー押下の場合はtrueを、キーを離す場合はfalseを指定する。</param>
+        /// <returns>SendInputが成功した場合はtrueが返る。</returns>
+        private bool SentGlobalKey(List<short> VirtualKeyList, bool IsKeyDown)
+        {
+            Input[] inputs = new Input[VirtualKeyList.Count];
+
+            foreach(var (vk, idx) in VirtualKeyList.Select((val, idx)=>(val, idx)))
+            {
+                inputs[idx] = new Input();
+                inputs[idx].Type = INPUT_KEYBOARD;
+                inputs[idx].ui.Keyboard.VirtualKey = vk;
+                inputs[idx].ui.Keyboard.ScanCode = (short)MapVirtualKey(vk, MAPVK_VK_TO_VSC_EX);
+                inputs[idx].ui.Keyboard.Flags = IsKeyDown ? KEYEVENTF_KEYDOWN : KEYEVENTF_KEYUP;
+                inputs[idx].ui.Keyboard.Time = 0;
+                inputs[idx].ui.Keyboard.ExtraInfo = IntPtr.Zero;
+            }
+
+            var result = SendInput(inputs.Length, inputs, Marshal.SizeOf(inputs[0]));
+            this.logger.Debug($"SendInput IsKeyDown:{IsKeyDown} inputs:{inputs.Length} result:{result}");
+            return result != 0;
+        }
+
         /// <summary>WM_MOUSEWHEELのパラメータを受け渡すキュー。</summary>
         private BlockingCollection<Tuple<int, int, int>> HookQueue = new BlockingCollection<Tuple<int, int, int>>();
         /// <summary>タスクのキャンセルオブジェクト。</summary>
         private CancellationTokenSource cancellation = new CancellationTokenSource();
         /// <summary>NLogのロガーインスタンス。</summary>
         private Logger logger;
+
+        private const int SENDINPUT_POSTMESSAGE_WAIT_TIME = 100;
     }
 
     /// <summary>判定領域の結果列挙体。</summary>
@@ -518,6 +675,8 @@ namespace ExplorerTabSwitcher
         WindowsTerminal,
         /// <summary>非切り替え対象(Windows Terminal)</summary>
         WindowsTerminalnotTab,
+        /// <summary>切り替え対象(Acrobat Reader DC)</summary>
+        AcrobatReader,
         /// <summary>非切り替え対象</summary>
         Another
     }
