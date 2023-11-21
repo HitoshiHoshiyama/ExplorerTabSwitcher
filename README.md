@@ -3,7 +3,7 @@
 ## 目的
 
 Windows11でタブ化したエクスプローラのタブを、マウスホイールで切り替えるために開発しました。  
-ついでということで、Edge/Windows Terminal/メモ帳/Acrobat Reader DCのタブ切り替えも可能にしました。  
+ついでということで、Edge/Windows Terminal/メモ帳/Acrobat Readerのタブ切り替えも可能にしました。  
 
 ## 動作環境
 
