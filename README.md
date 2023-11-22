@@ -69,8 +69,7 @@ Windows11でタブ化したエクスプローラのタブを、マウスホイ�
 
 ## 作者連絡先
 
-このプロジェクトは[こちらのサイト](https://github.com/HitoshiHoshiyama/ExplorerTabSwitcher)にてメンテナンスされています。  
-問題がある場合、[こちらからIssueを登録](https://github.com/HitoshiHoshiyama/ExplorerTabSwitcher/issues)していただけると助かります。
+Mail : [oss.develop.public@hosiyama.net](<mailto:oss.develop.public@hosiyama.net>)
 
 Copyright © 2023 Hitoshi Hoshiyama All Rights Reserved.  
 This project is licensed under the MIT License, see the LICENSE file.
