@@ -651,9 +651,9 @@ namespace ExplorerTabSwitcher
         /// <param name="element">検索の起点とするUI要素を指定する。</param>
         /// <returns><br>発見したトップレベルUI要素を返す。</br>
         /// <br>検索の起点にデスクトップを指定した場合はnullを返す。</br></returns>
-        private static AutomationElement? FindTopLevelWindow(TreeWalker treeWalker, AutomationElement element)
+        private static AutomationElement? FindTopLevelWindow(TreeWalker? treeWalker, AutomationElement? element)
         {
-            if (element is null) return null;
+            if (element is null || treeWalker is null) return null;
             else if (element == AutomationElement.RootElement) return null;
             var parent = treeWalker.GetParent(element);
             if (parent == AutomationElement.RootElement) return element;
