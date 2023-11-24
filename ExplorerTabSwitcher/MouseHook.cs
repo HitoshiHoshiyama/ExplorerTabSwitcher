@@ -717,7 +717,7 @@ namespace ExplorerTabSwitcher
         /// <summary>PostMessageの合間に挟む待機時間(msec)。</summary>
         private const int SENDINPUT_POSTMESSAGE_WAIT_TIME = 60;
         /// <summary>サポートしているトップレベルウィンドウのクラスリスト。</summary>
-        private readonly static List<string> supportedWindowClass = new() { "CabinetWClass", "Chrome_WidgetWin_1", "AcrobatSDIWindow", "CASCADIA_HOSTING_WINDOW_CLASS" };
+        private readonly static List<string> supportedWindowClass = new() { "CabinetWClass", "Chrome_WidgetWin_1", "AcrobatSDIWindow", "CASCADIA_HOSTING_WINDOW_CLASS", "Notepad" };
     }
 
     /// <summary>判定領域の結果列挙体。</summary>
