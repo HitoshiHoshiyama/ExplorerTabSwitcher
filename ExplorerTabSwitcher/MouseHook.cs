@@ -243,8 +243,9 @@ namespace ExplorerTabSwitcher
         /// </summary>
         public void SwitchTaskProc()
         {
+            var treeWalker = TreeWalker.ControlViewWalker;
             var point = new System.Windows.Point();
-            int delta;
+            int delta = 0;
             var skipList = new List<string>();  // 対象外だったAutomationElementのRuntimeIdリスト
 
             while (true)
@@ -264,6 +265,20 @@ namespace ExplorerTabSwitcher
                         this.logger.Debug($"AutomationElement.FromPoint({point.X}, {point.Y}) is null.");
                         continue;
                     }
+                    var topWindow = TabSwitcher.FindTopLevelWindow(treeWalker, target);
+                    if (topWindow is null)
+                    {
+                        this.logger.Debug($"AutomationElement.FromPoint({point.X}, {point.Y}) is Desktop.");
+                        continue;
+                    }
+                    else if (!TabSwitcher.supportedWindowClass.Contains(topWindow.Current.ClassName))
+                    {
+                        // 未サポートアプリからの滞留スクロールメッセージを破棄
+                        this.logger.Debug($"{topWindow.Current.ClassName} not supported.");
+                        this.ClearSameScroll(point);
+                        continue;
+                    }
+
                     // RuntimeIdをキーにリストをチェックし、登録済みなら対象外なので処理をスキップ
                     var runtimeId = target.GetRuntimeId();
                     var runtimeIdStr = runtimeId is not null ? string.Join(", ", runtimeId) : string.Empty;
@@ -367,7 +382,7 @@ namespace ExplorerTabSwitcher
             else if (TargetElm.Current.ClassName == "AVL_AVView" && TargetElm.Current.Name == "AVTabLinksContainerViewForDocs")
             {
                 // Acrobat Reader DCの可能性
-                var parent = this.FindParentElement(treeWalker, TargetElm, "AcrobatSDIWindow");
+                var parent = TabSwitcher.FindParentElement(treeWalker, TargetElm, "AcrobatSDIWindow");
                 if (parent is not null) result = new Tuple<TargetKind, AutomationElement, AutomationElement>(TargetKind.AcrobatReader, parent, parent);
                 else result = new Tuple<TargetKind, AutomationElement, AutomationElement>(TargetKind.Another, TargetElmArg, TargetElmArg);
             }
@@ -378,6 +393,26 @@ namespace ExplorerTabSwitcher
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 滞留したキューをクリアする。
+        /// </summary>
+        /// <param name="point">キューと突き合わせるための座標情報を指定する。</param>
+        private void ClearSameScroll(System.Windows.Point point)
+        {
+            if(this.HookQueue.Count == 0) return;
+            var count = 0;
+            foreach (var item in this.HookQueue.ToList())
+            {
+                if (item.Item1 != point.X || item.Item2 != point.Y) break;
+                else
+                {
+                    count++;
+                    this.HookQueue.Take();
+                }
+            }
+            if (count > 0) this.logger.Debug($"Remove duplicate queue:{count}");
         }
 
         /// <summary>
@@ -601,12 +636,28 @@ namespace ExplorerTabSwitcher
         /// <param name="automationClass">検索するクラス名を指定する。</param>
         /// <returns><br>発見した親UI要素を返す。</br>
         /// <br>見付からなかった場合はnullを返す。</br></returns>
-        private AutomationElement? FindParentElement(TreeWalker treeWalker, AutomationElement childElement, string automationClass)
+        private static AutomationElement? FindParentElement(TreeWalker treeWalker, AutomationElement childElement, string automationClass)
         {
             var parent = treeWalker.GetParent(childElement);
             if (parent is null) return null;
             else if (parent.Current.ClassName == automationClass) return parent;
-            else return this.FindParentElement(treeWalker, parent, automationClass);
+            else return TabSwitcher.FindParentElement(treeWalker, parent, automationClass);
+        }
+
+        /// <summary>
+        /// 指定UI要素のトップレベルUI要素を取得する。
+        /// </summary>
+        /// <param name="treeWalker">検索に使用するTreeWalkerを指定する。</param>
+        /// <param name="element">検索の起点とするUI要素を指定する。</param>
+        /// <returns><br>発見したトップレベルUI要素を返す。</br>
+        /// <br>検索の起点にデスクトップを指定した場合はnullを返す。</br></returns>
+        private static AutomationElement? FindTopLevelWindow(TreeWalker? treeWalker, AutomationElement? element)
+        {
+            if (element is null || treeWalker is null) return null;
+            else if (element == AutomationElement.RootElement) return null;
+            var parent = treeWalker.GetParent(element);
+            if (parent == AutomationElement.RootElement) return element;
+            else return TabSwitcher.FindTopLevelWindow(treeWalker, parent);
         }
 
         /// <summary>
@@ -657,13 +708,16 @@ namespace ExplorerTabSwitcher
         }
 
         /// <summary>WM_MOUSEWHEELのパラメータを受け渡すキュー。</summary>
-        private BlockingCollection<Tuple<int, int, int>> HookQueue = new BlockingCollection<Tuple<int, int, int>>();
+        private readonly BlockingCollection<Tuple<int, int, int>> HookQueue = new BlockingCollection<Tuple<int, int, int>>();
         /// <summary>タスクのキャンセルオブジェクト。</summary>
-        private CancellationTokenSource cancellation = new CancellationTokenSource();
+        private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
         /// <summary>NLogのロガーインスタンス。</summary>
-        private Logger logger;
+        private readonly Logger logger;
 
-        private const int SENDINPUT_POSTMESSAGE_WAIT_TIME = 100;
+        /// <summary>PostMessageの合間に挟む待機時間(msec)。</summary>
+        private const int SENDINPUT_POSTMESSAGE_WAIT_TIME = 60;
+        /// <summary>サポートしているトップレベルウィンドウのクラスリスト。</summary>
+        private readonly static List<string> supportedWindowClass = new() { "CabinetWClass", "Chrome_WidgetWin_1", "AcrobatSDIWindow", "CASCADIA_HOSTING_WINDOW_CLASS", "Notepad" };
     }
 
     /// <summary>判定領域の結果列挙体。</summary>
