@@ -364,7 +364,7 @@ namespace ExplorerTabSwitcher
                 // Explorerの可能性
                 result = this.IdentifyExplorer(treeWalker, TargetElm);
             }
-            else if (TargetElm.Current.ClassName == "TabStrip::TabDragContextImpl" && TargetElm.Current.FrameworkId == "Chrome")
+            else if (TargetElm.Current.ClassName == "TabStrip::EdgeTabDragContextImpl" && TargetElm.Current.FrameworkId == "Chrome")
             {
                 // Edgeの可能性
                 result = this.IdentifyEdge(treeWalker, TargetElm);
