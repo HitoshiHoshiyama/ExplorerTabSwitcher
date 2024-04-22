@@ -572,6 +572,10 @@ namespace ExplorerTabSwitcher
                         {
                             // 先頭タブがアクティブなので、最後尾タブが前のタブ扱い(ループ)
                             var lastTab = treeWalker.GetLastChild(element);
+                            while(lastTab is null || lastTab.Current.ClassName != tabClassName)
+                            {
+                                lastTab = treeWalker.GetPreviousSibling(lastTab);
+                            }
                             this.logger.Debug($"Previous tab found({lastTab.Current.Name}).");
                             result.Add(lastTab);
                         }
