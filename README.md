@@ -5,6 +5,11 @@
 Windows11でタブ化したエクスプローラのタブを、マウスホイールで切り替えるために開発しました。  
 ついでということで、Edge/Windows Terminal/メモ帳/Acrobat Readerのタブ切り替えも可能にしました。  
 
+## ダウンロード
+
+[https://github.com/HitoshiHoshiyama/ExplorerTabSwitcher/releases](https://github.com/HitoshiHoshiyama/ExplorerTabSwitcher/releases)から最新版のZIPファイルをダウンロードしてください。  
+執筆時点(2025/08/28)の最新バージョンはAlpha-7です。
+
 ## 動作環境
 
 - Windows11 22H2以降
