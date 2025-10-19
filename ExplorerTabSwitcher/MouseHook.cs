@@ -359,7 +359,9 @@ namespace ExplorerTabSwitcher
             }
 
             Tuple<TargetKind, AutomationElement, AutomationElement>? result;
-            if (TargetElm.Current.ClassName == "ListViewItem" && TargetElm.Current.FrameworkId == "XAML")
+            // ExplorerのUI要素構造が変わったため条件を追加
+            if ((TargetElm.Current.ClassName == "ListViewItem" && TargetElm.Current.FrameworkId == "XAML") ||
+                (TargetElm.Current.ClassName == "Microsoft.UI.Content.DesktopChildSiteBridge" && TargetElm.Current.FrameworkId == "Win32"))
             {
                 // Explorerの可能性
                 result = this.IdentifyExplorer(treeWalker, TargetElm);
@@ -442,7 +444,14 @@ namespace ExplorerTabSwitcher
                         // たぶんExplorerで間違いないはず
                         this.logger.Debug("Explorer tab found.");
                         // ExplorerはタブそのものがZ最上位にいるようなので、親を取得する必要がある
-                        var selectElms = this.GetSelectedChild(treeWalker, treeWalker.GetParent(TargetElm), "ListViewItem");
+                        // -> 並びが変わったためタブリストを検索するよう変更(並びが変わったタイミングは不明、24H2のどこか)
+                        var rootElm = treeWalker.GetParent(TargetElm);
+                        if (rootElm.Current.ClassName == "CabinetWClass")
+                        {
+                            var listElm = this.FindElements(TargetElm, "ListView");
+                            if (listElm != null && listElm.Count > 0) rootElm = listElm[0];
+                        }
+                        var selectElms = this.GetSelectedChild(treeWalker, rootElm, "ListViewItem");
                         if (selectElms.Count > 2)
                         {
                             this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
