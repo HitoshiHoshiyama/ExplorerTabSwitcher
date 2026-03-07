@@ -25,7 +25,7 @@ Windows11でタブ化したエクスプローラーのタブを、マウスの�
 - .NET 8.0
 
   動作確認はWindows11 25H2(x64)環境でしか行っていません。  
-  Windows10は未確認ですが、Edge/Acrobat Readerの切り替えは動く可能性はあります。
+  Windows10は未確認ですが、Edge/Acrobat Reader/Windows Terminalの切り替えは動く可能性はあります。
 
 ## 利用条件
 
@@ -88,5 +88,5 @@ Windows11でタブ化したエクスプローラーのタブを、マウスの�
 
 Mail : [oss.develop.public@hosiyama.net](<mailto:oss.develop.public@hosiyama.net>)
 
-Copyright © 2023 Hitoshi Hoshiyama All Rights Reserved.  
+Copyright © 2026 Hitoshi Hoshiyama All Rights Reserved.  
 This project is licensed under the MIT License, see the LICENSE file.

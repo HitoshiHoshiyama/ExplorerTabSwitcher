@@ -363,8 +363,8 @@ namespace ExplorerTabSwitcher
             if ((TargetElm.Current.ClassName == "ListViewItem" && TargetElm.Current.FrameworkId == "XAML") ||
                 (TargetElm.Current.ClassName == "Microsoft.UI.Content.DesktopChildSiteBridge" && TargetElm.Current.FrameworkId == "Win32"))
             {
-                // Explorerの可能性
-                result = this.IdentifyExplorer(treeWalker, TargetElm);
+                // Explorerまたはメモ帳の可能性
+                result = this.IdentifyExplorerOrNotepad(treeWalker, TargetElm);
             }
             else if (TargetElm.Current.ClassName == "TabStrip::EdgeTabDragContextImpl" && TargetElm.Current.FrameworkId == "Chrome")
             {
@@ -378,7 +378,7 @@ namespace ExplorerTabSwitcher
             }
             else if (TargetElm.Current.ClassName == "Notepad" && TargetElm.Current.FrameworkId == "Win32")
             {
-                // メモ帳の可能性(Windows Terminalとメモ帳は共通構造)
+                // メモ帳の可能性(Windows Terminalとメモ帳は共通構造)※後方互換性のため処理を残す
                 result = this.IdentifyWindosTerminal(treeWalker, TargetElm, MousePoint);
             }
             else if (TargetElm.Current.ClassName == "AVL_AVView" && TargetElm.Current.Name == "AVTabLinksContainerViewForDocs")
@@ -425,7 +425,7 @@ namespace ExplorerTabSwitcher
         /// <returns><br>切り替え対象だった場合、[対象コントロールの種別, 前のタブ, 後のタブ]の順に格納されたタプルが返る。</br>
         /// <br>該当しない場合は、対象コントロールの種別にTargetKind.Anotherが設定されたタプルが返る。
         /// この場合、前後のタブに設定された内容は保証されない。</br></returns>
-        private Tuple<TargetKind, AutomationElement, AutomationElement> IdentifyExplorer(TreeWalker treeWalker, AutomationElement TargetElm)
+        private Tuple<TargetKind, AutomationElement, AutomationElement> IdentifyExplorerOrNotepad(TreeWalker treeWalker, AutomationElement TargetElm)
         {
             var resultItem1 = TargetKind.Another;
             var resultItem2 = TargetElm;
@@ -439,25 +439,45 @@ namespace ExplorerTabSwitcher
                 {
                     // Explorerは親まで遡ってクラス名を見る必要がある
                     var parent = TreeWalker.ControlViewWalker.GetParent(nativeElm);
-                    if (parent != null && parent.Current.ClassName == "CabinetWClass")
+                    if (parent != null)
                     {
-                        // たぶんExplorerで間違いないはず
-                        this.logger.Debug("Explorer tab found.");
-                        // ExplorerはタブそのものがZ最上位にいるようなので、親を取得する必要がある
-                        // -> 並びが変わったためタブリストを検索するよう変更(並びが変わったタイミングは不明、24H2のどこか)
-                        var rootElm = treeWalker.GetParent(TargetElm);
-                        if (rootElm.Current.ClassName == "CabinetWClass")
+                        if (parent.Current.ClassName == "CabinetWClass")
                         {
-                            var listElm = this.FindElements(TargetElm, "ListView");
-                            if (listElm != null && listElm.Count > 0) rootElm = listElm[0];
+                            // たぶんExplorerで間違いないはず
+                            this.logger.Debug("Explorer tab found.");
+                            // ExplorerはタブそのものがZ最上位にいるようなので、親を取得する必要がある
+                            // -> 並びが変わったためタブリストを検索するよう変更(並びが変わったタイミングは不明、24H2のどこか)
+                            var rootElm = treeWalker.GetParent(TargetElm);
+                            if (rootElm.Current.ClassName == "CabinetWClass")
+                            {
+                                var listElm = this.FindElements(TargetElm, "ListView");
+                                if (listElm != null && listElm.Count > 0) rootElm = listElm[0];
+                            }
+                            var selectElms = this.GetSelectedChild(treeWalker, rootElm, "ListViewItem");
+                            if (selectElms.Count > 2)
+                            {
+                                this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
+                                resultItem1 = TargetKind.Explorer;
+                                resultItem2 = selectElms[1];
+                                resultItem3 = selectElms[2];
+                            }
                         }
-                        var selectElms = this.GetSelectedChild(treeWalker, rootElm, "ListViewItem");
-                        if (selectElms.Count > 2)
+                        else if (parent.Current.ClassName == "Notepad")
                         {
-                            this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
-                            resultItem1 = TargetKind.Explorer;
-                            resultItem2 = selectElms[1];
-                            resultItem3 = selectElms[2];
+                            // メモ帳
+                            this.logger.Debug("Notepad tab found.");
+                            var rootElm = this.FindElements(TargetElm, "ListView");
+                            if (rootElm != null && rootElm.Count > 0)
+                            {
+                                var selectElms = this.GetSelectedChild(treeWalker, rootElm[0], "ListViewItem");
+                                if (selectElms.Count > 2)
+                                {
+                                    this.logger.Debug($"Switch tab found({selectElms[1].Current.Name} <- {selectElms[0].Current.Name} -> {selectElms[2].Current.Name}).");
+                                    resultItem1 = TargetKind.WindowsTerminal;
+                                    resultItem2 = selectElms[1];
+                                    resultItem3 = selectElms[2];
+                                }
+                            }
                         }
                     }
                 }
